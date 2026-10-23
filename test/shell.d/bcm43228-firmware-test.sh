@@ -40,17 +40,41 @@ run_setup "00:1f.6 Ethernet controller [0200]: Intel I219-LM [8086:15b7]" >/dev/
 [[ -z $(packages) ]] ||
   fail "other network hardware does not install a Broadcom package" "$(packages)"
 
+stub="$scratch/bin"
+mkdir -p "$stub"
+cat >"$stub/lspci" <<'SH'
+#!/bin/bash
+printf '%s\n' "$BCM_PCI"
+SH
+cat >"$stub/omarchy-pkg-missing" <<'SH'
+#!/bin/bash
+[[ $1 == "b43-firmware" && $BCM_PACKAGE_STATE == "missing" ]]
+SH
+cat >"$stub/pacman" <<'SH'
+#!/bin/bash
+[[ $1 == "-Si" && $2 == "--" && $3 == "b43-firmware" && $BCM_PACKAGE_PUBLISHED == "yes" ]]
+SH
+cat >"$stub/omarchy-pkg-add" <<'SH'
+#!/bin/bash
+printf 'add %s\n' "$*" >>"$BCM_ACTIONS"
+SH
+cat >"$stub/omarchy-state" <<'SH'
+#!/bin/bash
+printf 'state %s\n' "$*" >>"$BCM_ACTIONS"
+SH
+chmod +x "$stub"/*
+
 run_migration() {
   local pci=$1
   local present=$2
   local published=$3
-  rm -f "$scratch/actions"
-  lspci() { printf '%s\n' "$pci"; }
-  omarchy-pkg-missing() { [[ $present == missing ]]; }
-  omarchy-pkg-add() { printf 'add %s\n' "$*" >>"$scratch/actions"; }
-  omarchy-state() { printf 'state %s\n' "$*" >>"$scratch/actions"; }
-  pacman() { [[ $published == yes ]]; }
-  source "$migration"
+  : >"$scratch/actions"
+  BCM_PCI=$pci \
+    BCM_PACKAGE_STATE=$present \
+    BCM_PACKAGE_PUBLISHED=$published \
+    BCM_ACTIONS=$scratch/actions \
+    PATH="$stub:$PATH" \
+    bash -euo pipefail "$migration"
 }
 
 actions() {
